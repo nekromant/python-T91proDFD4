@@ -5,6 +5,7 @@ logging.basicConfig()
 logging.getLogger('pygatt').setLevel(logging.DEBUG)
 import time
 import numpy as np
+import struct
 
 # The BGAPI backend will attemt to auto-discover the serial device name of the
 # attached BGAPI-compatible USB adapter.
@@ -89,6 +90,18 @@ class t91band(object):
     CMD_TUNE_TIME_DIRECT = 115;
     CMD_TUNE_TIME_INVERSE = 116;
 
+
+    MSG_TYPE_FACEBOOK = 5;
+    MSG_TYPE_Line = 9;
+    MSG_TYPE_PHONE_ACTION = 4;
+    MSG_TYPE_PHONE_RING = 0;
+    MSG_TYPE_QQ = 2;
+    MSG_TYPE_SKYPE = 8;
+    MSG_TYPE_SMS = 1;
+    MSG_TYPE_TWITTER = 7;
+    MSG_TYPE_WECHAT = 3;
+    MSG_TYPE_WHATSAPP = 6;
+
     def send_packet(self, data):
         print(data)
         self.device.char_write_handle(0x0011, data)
@@ -99,13 +112,11 @@ class t91band(object):
 
     def display_message(self, icon, message):
         packet = t91packet(self, self.CMD_MSG_NOTIFY);
-        packet.data[1] = 0x2 #icon;
+        packet.data[1] = icon #icon;
         packet.data[2] = 1 #(byte) total;
         packet.data[3] = 1 #(byte) index;
-        packet.data[4:4] = bytes(message, encoding='ascii')
-
-        self.send_packet(packet.data)
-
+        packet.data[4:4] = bytes(message, encoding="ascii") #(byte) index;
+        packet.send()
 
     def rq_version(self):
         packet = t91packet(self, self.CMD_MSG_GET_HW_AND_FW_VERSION);
@@ -151,6 +162,7 @@ class t91band(object):
 
     def __init__(self, address):
         self.adapter = pygatt.GATTToolBackend()
+        pygatt.BLEDevice.receive_notification = self.notify
         self.adapter.start()
         self.device = self.adapter.connect(address, address_type=pygatt.BLEAddressType.random)
         self.enable_notifications()
@@ -170,24 +182,38 @@ class t91band(object):
             data = [int(x, 16) for x in data.split(":")]
             return bytearray(data)
 
+    def get_int(self, value, offset):
+        tmp = [0x0, value[offset], value[offset+1], value[offset+2]]
+        return struct.unpack(">L", bytes(tmp))[0]
+
 
     def notify(self, handle, value):
         """
         handle -- integer, characteristic read handle the data was received on
         value -- bytearray, the data returned in the notification
         """
-        print("Received data: %s" % hexlify(value))
+        print("Received data: %s %d" % (hexlify(value), value[0]))
+        if (value[0] == self.CMD_GET_STEP_TODAY):
+            self.steps = self.get_int(value, 1)
+            print("Steps: ", self.steps)
+            self.run_steps = self.get_int(value, 4)
+            print("Running Steps: ", self.run_steps)
+            self.calories = self.get_int(value, 7)
+            print("Calories: ", self.calories)
 
 
 
 band = t91band('FD:4D:FE:86:A2:D3')
-#band.display_message(3, "Checking ma")
-#band.start_hr(6, 1); // realtime heart rate reporting
+band.get_steps()
+#band.start_hr(6, 1); # realtime heart rate reporting
+#time.sleep(1);
+#band.stop_hr()
+#band.display_message(band.MSG_TYPE_FACEBOOK, "Lulz")
+
 
 #band.rq_find()
-#band.start_hr(5, 25); # check & report heart rate
-#time.sleep(40);
-#band.start_hr(3, 1); # check & report oxygen
-band.rq_pressure(); # check & report oxygen
+band.start_hr(5, 25); # check & report heart rate
+time.sleep(30);
+band.start_hr(3, 25); # check & report oxygen
+#band.rq_pressure(); # check & report oxygen
 time.sleep(40);
-#band.stop_hr()
